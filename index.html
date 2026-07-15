@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulasi Tracking Teleskop: Alt-Az vs Ekuatorial</title>
+    <style>
+        :root {
+            --bg: #0b0f19;
+            --panel: #161b22;
+            --text: #ecf0f1;
+            --blue: #38bdf8;
+            --green: #2ecc71;
+            --red: #e74c3c;
+            --yellow: #f1c40f;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0; padding: 20px;
+            display: flex; flex-direction: column; align-items: center;
+        }
+        .container { max-width: 850px; width: 100%; }
+        h1 { text-align: center; color: var(--blue); margin-top: 0; font-size: 24px; }
+        p.subtitle { text-align: center; color: #8b949e; font-size: 14px; margin-bottom: 20px; }
+        
+        /* Tombol Mode */
+        .mode-selector {
+            display: flex; justify-content: center; gap: 15px; margin-bottom: 20px;
+        }
+        .btn-mode {
+            background: #21262d; border: 2px solid #30363d; color: var(--text);
+            padding: 12px 24px; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: bold;
+            transition: 0.3s; width: 45%; text-align: center;
+        }
+        .btn-mode.active-altaz { background: #1a365d; border-color: var(--blue); color: #fff; box-shadow: 0 0 15px rgba(56, 189, 248, 0.4); }
+        .btn-mode.active-eq { background: #14532d; border-color: var(--green); color: #fff; box-shadow: 0 0 15px rgba(46, 204, 113, 0.4); }
+
+        /* Area Kanvas Visual langit */
+        .canvas-box {
+            position: relative; width: 100%; height: 320px;
+            background: radial-gradient(circle at 50% 100%, #1e293b 0%, #030712 100%);
+            border: 1px solid #30363d; border-radius: 12px; overflow: hidden; margin-bottom: 20px;
+        }
+        canvas { width: 100%; height: 100%; display: block; }
+        
+        /* Panel Status Sumbu Motor */
+        .status-panel {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;
+        }
+        .axis-card {
+            background: var(--panel); padding: 15px; border-radius: 8px; border: 1px solid #30363d;
+        }
+        .axis-title { font-size: 14px; color: #8b949e; margin-bottom: 8px; display: flex; justify-content: space-between; }
+        .motor-status {
+            font-size: 18px; font-weight: bold; padding: 10px; border-radius: 6px; text-align: center; transition: 0.3s;
+        }
+        .moving { background: rgba(231, 76, 60, 0.2); color: var(--red); border: 1px solid var(--red); }
+        .locked { background: rgba(139, 148, 158, 0.1); color: #8b949e; border: 1px solid #30363d; }
+        .smooth { background: rgba(46, 204, 113, 0.2); color: var(--green); border: 1px solid var(--green); }
+
+        /* Penjelasan Mode Aktif */
+        .desc-box {
+            background: var(--panel); padding: 20px; border-radius: 8px; border-left: 5px solid var(--blue);
+        }
+        .desc-box h3 { margin-top: 0; color: var(--yellow); }
+        .desc-box ul { margin: 0; padding-left: 20px; line-height: 1.6; font-size: 14px; }
+        
+        /* Tombol Kontrol Waktu */
+        .controls { display: flex; justify-content: center; gap: 10px; margin-bottom: 15px; }
+        .btn-ctrl { background: #30363d; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: bold; }
+        .btn-ctrl:hover { background: #484f58; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>🔭 Simulasi Cara Kerja Mounting Teleskop</h1>
+    <p class="subtitle">Perhatikan pergerakan crosshair (target merah) saat mengikuti busur gerak bintang di langit!</p>
+
+    <!-- Tombol Pilih Mode -->
+    <div class="mode-selector">
+        <button class="btn-mode active-altaz" id="btn-altaz" onclick="setMode('altaz')">1. MODE ALT-AZ<br><span style="font-size:12px; font-weight:normal;">(Prinsip Horizon)</span></button>
+        <button class="btn-mode" id="btn-eq" onclick="setMode('eq')">2. MODE EKUATORIAL<br><span style="font-size:12px; font-weight:normal;">(Prinsip Ekuatorial)</span></button>
+    </div>
+
+    <!-- Kanvas Langit -->
+    <div class="canvas-box">
+        <canvas id="skyCanvas" width="800" height="320"></canvas>
+    </div>
+
+    <!-- Kontrol Putar -->
+    <div class="controls">
+        <button class="btn-ctrl" onclick="togglePlay()" id="playBtn">⏸️ Pause Tracking</button>
+        <button class="btn-ctrl" onclick="resetTime()">⏮️ Ulangi dari Timur</button>
+    </div>
+
+    <!-- Panel Motor Sumbu -->
+    <div class="status-panel">
+        <div class="axis-card">
+            <div class="axis-title"><span id="axis1-name">Sumbu 1: Azimuth (Kiri - Kanan)</span> <span id="axis1-val">0°</span></div>
+            <div class="motor-status moving" id="axis1-status">⚠️ MOTOR BERGERAK TERUS</div>
+        </div>
+        <div class="axis-card">
+            <div class="axis-title"><span id="axis2-name">Sumbu 2: Altitude (Atas - Bawah)</span> <span id="axis2-val">0°</span></div>
+            <div class="motor-status moving" id="axis2-status">⚠️ MOTOR BERGERAK TERUS</div>
+        </div>
+    </div>
+
+    <!-- Penjelasan Dinamis -->
+    <div class="desc-box" id="desc-content">
+        <!-- Diisi oleh JS -->
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('skyCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    let mode = 'altaz'; // 'altaz' atau 'eq'
+    let time = 0; // 0 sampai 1
+    let isPlaying = true;
+    let animationId;
+
+    // Set penjelasan default
+    updateDescription();
+
+    function setMode(newMode) {
+        mode = newMode;
+        document.getElementById('btn-altaz').className = 'btn-mode ' + (mode === 'altaz' ? 'active-altaz' : '');
+        document.getElementById('btn-eq').className = 'btn-mode ' + (mode === 'eq' ? 'active-eq' : '');
+        
+        const axis1Name = document.getElementById('axis1-name');
+        const axis2Name = document.getElementById('axis2-name');
+        const axis1Status = document.getElementById('axis1-status');
+        const axis2Status = document.getElementById('axis2-status');
+
+        if (mode === 'altaz') {
+            axis1Name.textContent = "Sumbu 1: Azimuth (Kiri - Kanan)";
+            axis2Name.textContent = "Sumbu 2: Altitude (Atas - Bawah)";
+            axis1Status.textContent = "⚠️ MOTOR BERGERAK TERUS";
+            axis1Status.className = "motor-status moving";
+            axis2Status.textContent = "⚠️ MOTOR BERGERAK TERUS";
+            axis2Status.className = "motor-status moving";
+        } else {
+            axis1Name.textContent = "Sumbu 1: RA / HA (Sumbu Putar Bumi)";
+            axis2Name.textContent = "Sumbu 2: Deklinasi (Dec)";
+            axis1Status.textContent = "✅ BERPUTAR HALUS (15°/jam)";
+            axis1Status.className = "motor-status smooth";
+            axis2Status.textContent = "🔒 DIKUNCI MATI (DIAM)";
+            axis2Status.className = "motor-status locked";
+        }
+        updateDescription();
+    }
+
+    function updateDescription() {
+        const desc = document.getElementById('desc-content');
+        if (mode === 'altaz') {
+            desc.style.borderLeftColor = "var(--blue)";
+            desc.innerHTML = `
+                <h3>🔭 Apa yang Terjadi pada Mode Alt-Az?</h3>
+                <ul>
+                    <li>Karena bintang bergerak dalam **busur melengkung**, teleskop dengan engsel datar (horizon) tidak bisa mengikutinya dalam 1 garis lurus.</li>
+                    <li>Perhatikan crosshair merah: Untuk tetap menempel pada bintang, komputer teleskop harus terus-menerus **menggeser motor horisontal (Azimuth) DAN motor vertikal (Altitude) secara bersamaan**!</li>
+                    <li>Gerakannya menghasilkan jalur "zig-zag" bertangga yang sangat halus. Ini membuat Alt-Az kurang cocok untuk foto astrofotografi durasi panjang karena gambar langitnya akan mengalami *Field Rotation* (berputar sendiri).</li>
+                </ul>
+            `;
+        } else {
+            desc.style.borderLeftColor = "var(--green)";
+            desc.innerHTML = `
+                <h3>✨ Apa yang Terjadi pada Mode Ekuatorial (EQ)?</h3>
+                <ul>
+                    <li>Kunci rahasianya: Sumbu utama teleskop ini sudah **dimiringkan sejak awal** agar sejajar persis dengan sumbu putaran Bumi!</li>
+                    <li>Karena kemiringan teleskop sudah *match* dengan lengkungan busur langit, **Sumbu Deklinasi (Dec) bisa langsung DIKUNCI MATI (tidak perlu digerakkan sama sekali)**.</li>
+                    <li>Teleskop **hanya perlu memutar 1 motor saja (Sumbu RA/HA)** secara perlahan. Bintang akan terus berada persis di tengah crosshair tanpa ada efek putaran gambar. Sangat sempurna untuk astrofotografi!</li>
+                </ul>
+            `;
+        }
+    }
+
+    function togglePlay() {
+        isPlaying = !isPlaying;
+        document.getElementById('playBtn').textContent = isPlaying ? "⏸️ Pause Tracking" : "▶️ Lanjut Tracking";
+    }
+
+    function resetTime() {
+        time = 0;
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // 1. Gambar Gambar Bumi/Horizon di bawah
+        ctx.fillStyle = "#0f172a";
+        ctx.fillRect(0, 270, canvas.width, 50);
+        ctx.strokeStyle = "#334155";
+        ctx.beginPath(); ctx.moveTo(0, 270); ctx.lineTo(canvas.width, 270); ctx.stroke();
+        ctx.fillStyle = "#64748b"; ctx.font = "12px sans-serif";
+        ctx.fillText("TIMUR (Terbit)", 20, 290);
+        ctx.fillText("BARAT (Terbenam)", canvas.width - 120, 290);
+        ctx.fillText("HORIZON (Dataran Bumi)", canvas.width / 2 - 60, 290);
+
+        // 2. Gambar Jalur Busur Bintang (Lengkungan Langit)
+        const centerX = canvas.width / 2;
+        const centerY = 290;
+        const radius = 220;
+
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, radius, Math.PI, 0);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Hitung Posisi Bintang saat ini (Bergerak di sepanjang busur dari kiri ke kanan)
+        const angle = Math.PI - (time * Math.PI); // dari PI (kiri) ke 0 (kanan)
+        const starX = centerX + radius * Math.cos(angle);
+        const starY = centerY - radius * Math.sin(angle);
+
+        // 3. Gambar Jejak Tracking Teleskop
+        if (mode === 'altaz') {
+            // Gambar efek tangga zig-zag Alt-Az
+            ctx.strokeStyle = "rgba(56, 189, 248, 0.4)";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            let steps = Math.floor(time * 20);
+            for(let i=0; i<=steps; i++) {
+                let t = i / 20;
+                let a = Math.PI - (t * Math.PI);
+                let sx = centerX + radius * Math.cos(a);
+                let sy = centerY - radius * Math.sin(a);
+                if (i===0) ctx.moveTo(sx, sy);
+                else {
+                    // Gerak horisontal dulu, baru vertikal (zig-zag)
+                    ctx.lineTo(sx, centerY - radius * Math.sin(Math.PI - ((i-1)/20)*Math.PI));
+                    ctx.lineTo(sx, sy);
+                }
+            }
+            ctx.stroke();
+        } else {
+            // Gambar jalur ekuatorial yang mulus menyatu dengan busur
+            ctx.strokeStyle = "rgba(46, 204, 113, 0.6)";
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, radius, Math.PI, angle);
+            ctx.stroke();
+        }
+
+        // 4. Gambar Bintang
+        ctx.fillStyle = "#fff176";
+        ctx.shadowColor = "#fff176";
+        ctx.shadowBlur = 15;
+        ctx.beginPath();
+        ctx.arc(starX, starY, 8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0; // reset shadow
+
+        // 5. Gambar Crosshair Teleskop (Target Merah)
+        ctx.strokeStyle = "#e74c3c";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(starX, starY, 16, 0, Math.PI * 2);
+        ctx.moveTo(starX - 22, starY); ctx.lineTo(starX + 22, starY);
+        ctx.moveTo(starX, starY - 22); ctx.lineTo(starX, starY + 22);
+        ctx.stroke();
+
+        // 6. Update Angka di Panel
+        // Alt-Az: Azimuth (0 sampai 180), Altitude (sinusoidal 0 ke 60 ke 0)
+        let azVal = Math.round(time * 180);
+        let altVal = Math.round(Math.sin(time * Math.PI) * 60);
+        
+        // EQ: RA (-6 jam sampai +6 jam), Dec tetap (+20 derajat misalnya)
+        let raVal = ((time * 12) - 6).toFixed(1);
+        let decVal = 20;
+
+        if (mode === 'altaz') {
+            document.getElementById('axis1-val').textContent = `${azVal}° (Geser Kanan)`;
+            document.getElementById('axis2-val').textContent = `${altVal}° (Naik/Turun)`;
+        } else {
+            document.getElementById('axis1-val').textContent = `${raVal} Jam (Berputar)`;
+            document.getElementById('axis2-val').textContent = `+${decVal}° (Terkunci!)`;
+        }
+
+        // Animasi Loop Waktu
+        if (isPlaying) {
+            time += 0.0015;
+            if (time > 1) time = 0; // Ulangi kalau sudah sampai barat
+        }
+
+        requestAnimationFrame(draw);
+    }
+
+    // Mulai animasi
+    draw();
+</script>
+
+</body>
+</html>
